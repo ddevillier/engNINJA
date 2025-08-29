@@ -1,10 +1,10 @@
-
 import { useState } from 'react'
 import { useStore } from '../store'
 import { getBlob } from '../lib/storage'
 import { loadPdf, renderPageToCanvas } from '../lib/pdf'
 import { autoTiles, computeOverlapPixels } from '../lib/tiler'
 import { zipPngs } from '../lib/zipper'
+import { getPageNameMap } from '../lib/pageNames'
 
 async function cropTile(pageCanvas: HTMLCanvasElement, x:number,y:number,w:number,h:number,tileSize:number): Promise<Blob> {
   const out = document.createElement('canvas')
@@ -31,6 +31,8 @@ export default function ExportPanel(){
       const blob = await getBlob(project.pdfBlobKey)
       if (!blob) return
       const pdf = await loadPdf(blob)
+      const nameMap = await getPageNameMap(pdf)
+      const naming = nameMap.get(pageNum)!
       const page = await pdf.getPage(pageNum)
       const pageState = project.pages[pageNum]
       const pageCanvas = await renderPageToCanvas(page, pageState.params.dpi)
@@ -46,7 +48,7 @@ export default function ExportPanel(){
         let i = 0
         for (const t of tiles){
           const b = await cropTile(pageCanvas, t.x, t.y, t.w, t.h, tileSize)
-          const filename = `page-${pageNum}/auto/tile-${i}-${t.x}x${t.y}.png`
+          const filename = `${naming.pageName}/auto/tile-${i}-${t.x}x${t.y}.png`
           files.push({ path: filename, blob: b })
           manifest.tiles.push({ index: i, x: t.x, y: t.y, w: t.w, h: t.h, filename })
           i++
@@ -60,15 +62,21 @@ export default function ExportPanel(){
             continue
           }
           const b = await cropTile(pageCanvas, t.x, t.y, t.size, t.size, t.size)
-          const filename = `page-${pageNum}/manual/tile-${i}-${t.x}x${t.y}.png`
+          const filename = `${naming.pageName}/manual/tile-${i}-${t.x}x${t.y}.png`
           files.push({ path: filename, blob: b })
           manifest.tiles.push({ id: t.id, x: t.x, y: t.y, size: t.size, filename })
           i++
         }
       }
-      // append manifest json into files
+
+      // enrich naming in per-page manifest and write inside the named folder
+      manifest.pageName = naming.pageName
+      if (naming.pageLabel) manifest.pageLabel = naming.pageLabel
+      if (naming.bookmarkPath) manifest.bookmarkPath = naming.bookmarkPath
+
       const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
-      files.push({ path: `page-${pageNum}/manifest.json`, blob: manifestBlob })
+      files.push({ path: `${naming.pageName}/manifest.json`, blob: manifestBlob })
+
       await zipPngs(files, `engninja-tiles-page-${pageNum}.zip`)
     } finally {
       setBusy(false)
@@ -82,24 +90,36 @@ export default function ExportPanel(){
       const blob = await getBlob(project.pdfBlobKey)
       if (!blob) return
       const pdf = await loadPdf(blob)
+      const nameMap = await getPageNameMap(pdf)
 
       const files: {path:string, blob:Blob}[] = []
       const manifest: any = { pages: [] as any[] }
 
       for (let pageNum=1; pageNum<=project.totalPages; pageNum++){
+        const naming = nameMap.get(pageNum)!
         const page = await pdf.getPage(pageNum)
         const pageState = project.pages[pageNum]
         const pageCanvas = await renderPageToCanvas(page, pageState.params.dpi)
         const { tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY, marginPx } = pageState.params
         const { overlapX:ox, overlapY:oy } = computeOverlapPixels(tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY)
 
-        const pageEntry: any = { page: pageNum, mode: project.mode, params: pageState.params, tiles: [] as any[], masks: [] as any[] }
+        const pageEntry: any = {
+          page: pageNum,
+          pageName: naming.pageName,
+          pageLabel: naming.pageLabel,
+          bookmarkPath: naming.bookmarkPath,
+          mode: project.mode,
+          params: pageState.params,
+          tiles: [] as any[],
+          masks: [] as any[]
+        }
+
         if (project.mode === 'auto'){
           const tiles = autoTiles(pageCanvas.width, pageCanvas.height, tileSize, ox, oy, marginPx)
           let i = 0
           for (const t of tiles){
             const b = await cropTile(pageCanvas, t.x, t.y, t.w, t.h, tileSize)
-            const filename = `page-${pageNum}/auto/tile-${i}-${t.x}x${t.y}.png`
+            const filename = `${naming.pageName}/auto/tile-${i}-${t.x}x${t.y}.png`
             files.push({ path: filename, blob: b })
             pageEntry.tiles.push({ index: i, x: t.x, y: t.y, w: t.w, h: t.h, filename })
             i++
@@ -112,18 +132,26 @@ export default function ExportPanel(){
               continue
             }
             const b = await cropTile(pageCanvas, t.x, t.y, t.size, t.size, t.size)
-            const filename = `page-${pageNum}/manual/tile-${i}-${t.x}x${t.y}.png`
+            const filename = `${naming.pageName}/manual/tile-${i}-${t.x}x${t.y}.png`
             files.push({ path: filename, blob: b })
             pageEntry.tiles.push({ id: t.id, x: t.x, y: t.y, size: t.size, filename })
             i++
           }
         }
-        // push per-page manifest entry
+
         manifest.pages.push(pageEntry)
       }
-      // append global manifest file
+
+      // append global manifest and export info at the root
       const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
+      const exportInfo = {
+        app: 'EngNinja Pro',
+        version: '0.1.0',
+        exportedAt: new Date().toISOString()
+      }
       files.push({ path: `manifest.json`, blob: manifestBlob })
+      files.push({ path: `export-info.json`, blob: new Blob([JSON.stringify(exportInfo, null, 2)], { type: 'application/json' }) })
+
       await zipPngs(files, `engninja-tiles-all-pages.zip`)
     } finally {
       setBusy(false)
