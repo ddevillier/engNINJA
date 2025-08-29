@@ -39,14 +39,24 @@ export default function CanvasView(){
   // Listen for keyboard events to move/delete selected manual tiles
   useEffect(()=>{
     function handleKeyDown(e: KeyboardEvent){
-      if (!project || project.mode !== 'manual' || !selectedTileId) return
+      if (!project || project.mode !== 'manual') return
       const key = e.key
+
+      // Allow quick deselect
+      if (key === 'Escape'){
+        setSelectedTileId(null)
+        return
+      }
+
+      if (!selectedTileId) return
       if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Delete','Backspace'].includes(key)) return
       e.preventDefault()
+
       // Locate the tile to manipulate
       const pageState = project.pages[project.currentPage]
       const tileIndex = pageState.manualTiles.findIndex(t => t.id === selectedTileId)
       if (tileIndex === -1) return
+
       // Handle deletion: remove tile and clear selection
       if (key === 'Delete' || key === 'Backspace'){
         updateProject(project.id, p => {
@@ -55,6 +65,7 @@ export default function CanvasView(){
         setSelectedTileId(null)
         return
       }
+
       // Movement: compute new position based on arrow key and optional shift modifier
       const step = e.shiftKey ? 10 : 1
       const canvasW = pageCanvas?.width ?? 0
@@ -78,6 +89,40 @@ export default function CanvasView(){
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [project, selectedTileId, updateProject, pageCanvas])
+
+  // --- UI helpers for Manual mode ---
+  function deleteSelectedTile() {
+    if (!project || project.mode !== 'manual' || !selectedTileId) return
+    const pageTiles = project.pages[project.currentPage].manualTiles
+    const idx = pageTiles.findIndex(t => t.id === selectedTileId)
+    if (idx === -1) return
+    updateProject(project.id, p => {
+      p.pages[p.currentPage].manualTiles.splice(idx, 1)
+    })
+    setSelectedTileId(null)
+  }
+
+  function resetManualTilesPage() {
+    if (!project || project.mode !== 'manual') return
+    const ok = window.confirm('Clear all manual tiles on this page? This cannot be undone.')
+    if (!ok) return
+    updateProject(project.id, p => {
+      p.pages[p.currentPage].manualTiles = []
+    })
+    setSelectedTileId(null)
+  }
+
+  function resetManualTilesAll() {
+    if (!project) return
+    const ok = window.confirm('Clear all manual tiles on ALL pages? This cannot be undone.')
+    if (!ok) return
+    updateProject(project.id, p => {
+      for (let i = 1; i <= p.totalPages; i++){
+        p.pages[i].manualTiles = []
+      }
+    })
+    setSelectedTileId(null)
+  }
 
   function drawOverlay(){
     if (!pageCanvas || !overlayRef.current || !project) return
@@ -168,8 +213,37 @@ export default function CanvasView(){
 
   if (!project) return null
 
+  const isManual = project.mode === 'manual'
+  const hasSelection = Boolean(selectedTileId)
+
   return (
     <div className="flex-1 min-w-0 min-h-0 relative" ref={containerRef}>
+
+      {/* floating mini-toolbar (visible only in Manual mode) */}
+      {isManual && (
+        <div className="absolute right-4 top-4 z-20 flex gap-2">
+          <button
+            className="px-3 py-1 rounded bg-rose-600 text-white disabled:opacity-50"
+            onClick={deleteSelectedTile}
+            disabled={!hasSelection}
+            title="Delete selected tile">
+            Delete Selected
+          </button>
+          <button
+            className="px-3 py-1 rounded bg-amber-600 text-white"
+            onClick={resetManualTilesPage}
+            title="Clear all manual tiles on current page">
+            Reset Page Tiles
+          </button>
+          <button
+            className="px-3 py-1 rounded bg-amber-700 text-white"
+            onClick={resetManualTilesAll}
+            title="Clear all manual tiles on ALL pages">
+            Reset All Tiles
+          </button>
+        </div>
+      )}
+
       <div className="absolute inset-0 overflow-auto grid place-items-center p-4">
         {pageCanvas ? (
           // visually scale the preview; export DPI remains true to params.dpi
