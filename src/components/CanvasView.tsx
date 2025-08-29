@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { getBlob } from '../lib/storage'
@@ -118,12 +117,13 @@ export default function CanvasView(){
   function onCanvasClick(e: React.MouseEvent){
     if (!project || project.mode !== 'manual' || !pageCanvas) return
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect()
-    const localX = e.clientX - rect.left
-    const localY = e.clientY - rect.top
+    // convert to page pixel coords (remove preview zoom)
+    const zoom = (project.pages[project.currentPage].previewZoom ?? 100) / 100
+    const localX = (e.clientX - rect.left) / zoom
+    const localY = (e.clientY - rect.top) / zoom
     const page = project.pages[project.currentPage]
     const { tileSize, snapToGrid } = page.params
-    // Determine if click hits an existing tile
-    // find the topmost tile by iterating in reverse order
+    // Determine if click hits an existing tile (topmost first)
     const clickedTile = [...page.manualTiles].reverse().find(t => {
       return localX >= t.x && localX <= t.x + t.size && localY >= t.y && localY <= t.y + t.size
     })
@@ -172,9 +172,22 @@ export default function CanvasView(){
     <div className="flex-1 min-w-0 min-h-0 relative" ref={containerRef}>
       <div className="absolute inset-0 overflow-auto grid place-items-center p-4">
         {pageCanvas ? (
-          <div className="relative" style={{ width: pageCanvas.width, height: pageCanvas.height }}>
-            <img src={pageCanvas.toDataURL()} alt="page" className="block select-none pointer-events-none" />
-            <canvas ref={overlayRef} className="absolute inset-0" onClick={onCanvasClick}/>
+          // visually scale the preview; export DPI remains true to params.dpi
+          <div
+            className="relative"
+            style={{
+              width: pageCanvas.width,
+              height: pageCanvas.height,
+              transform: `scale(${(project?.pages[project.currentPage].previewZoom ?? 100)/100})`,
+              transformOrigin: 'top left'
+            }}>
+            <img
+              src={pageCanvas.toDataURL()}
+              alt="page"
+              className="block select-none pointer-events-none w-full h-full"
+              draggable={false}
+            />
+            <canvas ref={overlayRef} className="absolute inset-0 w-full h-full" onClick={onCanvasClick}/>
           </div>
         ) : (
           <div className="opacity-60">Rendering…</div>

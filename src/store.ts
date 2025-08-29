@@ -1,7 +1,6 @@
-
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Project, TilingParams, ManualTile, Mode } from './types'
+import type { Project, TilingParams } from './types'
 
 type Store = {
   projects: Record<string, Project>
@@ -65,7 +64,8 @@ export function createNewProject(id: string, name: string, totalPages: number, s
     pages[i] = {
       pageNumber: i,
       params: { ...defaultParams },
-      manualTiles: []
+      manualTiles: [],
+      previewZoom: 100
     }
   }
   const p: Project = {

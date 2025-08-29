@@ -1,4 +1,3 @@
-
 import { allowedTileSizes, useStore } from '../store'
 import type { Mode } from '../types'
 import { useMemo } from 'react'
@@ -31,6 +30,14 @@ export default function Toolbar(){
   function switchMode(mode: Mode){
     if (!project) return
     updateProject(project.id, p => { p.mode = mode })
+  }
+
+  function updatePreviewZoom(value:number){
+    if (!project || !page) return
+    const v = Math.max(5, Math.min(400, value))
+    updateProject(project.id, p => {
+      p.pages[p.currentPage].previewZoom = v
+    })
   }
 
   if (!project || !params) return null
@@ -102,6 +109,21 @@ export default function Toolbar(){
         <input type="number" min={72} step={1} className="ml-2 w-24 bg-zinc-800 rounded px-2 py-1"
           value={params.dpi}
           onChange={e=>updateParam('dpi', Number(e.target.value))}/>
+      </label>
+
+      <div className="w-px h-6 bg-zinc-800" />
+
+      <label className="text-sm">Zoom
+        <input
+          type="range"
+          min={5}
+          max={400}
+          step={5}
+          className="ml-2 align-middle"
+          value={page?.previewZoom ?? 25}
+          onChange={e=>updatePreviewZoom(Number(e.target.value))}
+        />
+        <span className="ml-2 opacity-70">{page?.previewZoom ?? 100}%</span>
       </label>
 
       <label className="text-sm">Margin
