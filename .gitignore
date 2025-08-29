@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# builds & caches
+dist/
+.vite/
+coverage/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# editor/OS noise
+.DS_Store
+Thumbs.db
+
+# environment & local state
+.env
+.env.*.local
+
+# app outputs
+*.zip
+exports/

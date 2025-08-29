@@ -1,4 +1,3 @@
-
 export type Mode = 'auto' | 'manual'
 
 export type TilingParams = {
@@ -15,24 +14,12 @@ export type TilingParams = {
   pageScale: number         // derived: dpi/72 - computed at runtime, kept for info
 }
 
-/**
- * A manually placed tile on a page. When `isMask` is true the tile represents
- * a dead‑space mask and is excluded from export. Manual tiles store a
- * position and a fixed square size derived from the page’s current tiling
- * parameters. A unique id allows us to track and update specific tiles when
- * moving them with the keyboard or deleting them via the delete key.
- */
 export type ManualTile = {
   id: string
-  /** top‑left x coordinate in page pixel space */
   x: number
-  /** top‑left y coordinate in page pixel space */
   y: number
-  /** width/height of the square tile */
   size: number
-  /** overlay colour for the tile */
   color: string
-  /** when true this tile represents a mask and will not be exported */
   isMask?: boolean
 }
 
@@ -40,6 +27,8 @@ export type PageState = {
   pageNumber: number
   params: TilingParams
   manualTiles: ManualTile[]
+  /** UI-only zoom percent for preview (25–400). Does not affect export DPI. */
+  previewZoom?: number
 }
 
 export type Project = {
@@ -47,7 +36,7 @@ export type Project = {
   name: string
   createdAt: number
   updatedAt: number
-  pdfBlobKey?: string       // key into IndexedDB for the PDF blob
+  pdfBlobKey?: string
   totalPages: number
   currentPage: number
   mode: Mode
