@@ -1,4 +1,4 @@
-export type Mode = 'auto' | 'manual'
+export type Mode = 'auto' | 'manual' | 'slicing'
 
 export type TilingParams = {
   tileSize: 128 | 256 | 512 | 1024 | 2048
@@ -23,12 +23,30 @@ export type ManualTile = {
   isMask?: boolean
 }
 
+export type Scooter = {
+  id: string
+  pos: number // x or y coordinate depending on direction
+}
+
+export type SlicingState = {
+  direction: 'horizontal' | 'vertical'
+  method: 'fixed' | 'manual'
+  // Fixed method params
+  sliceSize: number
+  overlap: number
+  // Manual method params
+  scooters: Scooter[]
+}
+
 export type PageState = {
   pageNumber: number
   params: TilingParams
   manualTiles: ManualTile[]
+  slicing: SlicingState
   /** UI-only zoom percent for preview (25–400). Does not affect export DPI. */
   previewZoom?: number
+  panX?: number
+  panY?: number
 }
 
 export type Project = {

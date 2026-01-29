@@ -1,31 +1,22 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { getBlob } from '../lib/storage'
-import { loadPdf, renderPageToCanvas } from '../lib/pdf'
-import { autoTiles, computeOverlapPixels } from '../lib/tiler'
+import { loadPdf } from '../lib/pdf'
 import { zipPngs } from '../lib/zipper'
+import { exportPage, exportAllPages, type PageExportResult } from '../lib/export'
 import { getPageNameMap } from '../lib/pageNames'
 
-async function cropTile(pageCanvas: HTMLCanvasElement, x:number,y:number,w:number,h:number,tileSize:number): Promise<Blob> {
-  const out = document.createElement('canvas')
-  out.width = tileSize
-  out.height = tileSize
-  const ctx = out.getContext('2d')!
-  ctx.imageSmoothingEnabled = false
-  ctx.clearRect(0,0,out.width,out.height)
-  ctx.drawImage(pageCanvas, x, y, w, h, 0, 0, w, h)
-  return await new Promise(resolve => out.toBlob(b=>resolve(b!), 'image/png'))
-}
-
-export default function ExportPanel(){
-  const projectId = useStore(s=>s.currentProjectId)
-  const project = useStore(s=> projectId ? s.projects[projectId] : undefined)
+export default function ExportPanel() {
+  const projectId = useStore(s => s.currentProjectId)
+  const project = useStore(s => projectId ? s.projects[projectId] : undefined)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
 
   if (!project) return null
 
-  async function exportPage(pageNum: number){
+  async function handleExportPage(pageNum: number) {
     setBusy(true)
+    setProgress(null)
     try {
       if (!project.pdfBlobKey) return
       const blob = await getBlob(project.pdfBlobKey)
@@ -33,114 +24,38 @@ export default function ExportPanel(){
       const pdf = await loadPdf(blob)
       const nameMap = await getPageNameMap(pdf)
       const naming = nameMap.get(pageNum)!
-      const page = await pdf.getPage(pageNum)
-      const pageState = project.pages[pageNum]
-      const pageCanvas = await renderPageToCanvas(page, pageState.params.dpi)
-      const { tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY, marginPx } = pageState.params
-      const { overlapX:ox, overlapY:oy } = computeOverlapPixels(tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY)
 
-      const files: {path:string, blob:Blob}[] = []
-      // Build a manifest describing the exported tiles for this page
-      const manifest: any = { page: pageNum, mode: project.mode, params: pageState.params, tiles: [] as any[], masks: [] as any[] }
-
-      if (project.mode === 'auto'){
-        const tiles = autoTiles(pageCanvas.width, pageCanvas.height, tileSize, ox, oy, marginPx)
-        let i = 0
-        for (const t of tiles){
-          const b = await cropTile(pageCanvas, t.x, t.y, t.w, t.h, tileSize)
-          const filename = `${naming.pageName}/auto/tile-${i}-${t.x}x${t.y}.png`
-          files.push({ path: filename, blob: b })
-          manifest.tiles.push({ index: i, x: t.x, y: t.y, w: t.w, h: t.h, filename })
-          i++
-        }
-      } else {
-        let i = 0
-        for (const t of pageState.manualTiles){
-          // Skip masks from export but include them in manifest
-          if (t.isMask){
-            manifest.masks.push({ id: t.id, x: t.x, y: t.y, size: t.size })
-            continue
-          }
-          const b = await cropTile(pageCanvas, t.x, t.y, t.size, t.size, t.size)
-          const filename = `${naming.pageName}/manual/tile-${i}-${t.x}x${t.y}.png`
-          files.push({ path: filename, blob: b })
-          manifest.tiles.push({ id: t.id, x: t.x, y: t.y, size: t.size, filename })
-          i++
-        }
-      }
+      const result = await exportPage(pdf, project, pageNum, naming)
 
       // enrich naming in per-page manifest and write inside the named folder
-      manifest.pageName = naming.pageName
-      if (naming.pageLabel) manifest.pageLabel = naming.pageLabel
-      if (naming.bookmarkPath) manifest.bookmarkPath = naming.bookmarkPath
-
+      const manifest = { ...result.manifest }
       const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
-      files.push({ path: `${naming.pageName}/manifest.json`, blob: manifestBlob })
+      result.files.push({ path: `${naming.pageName}/manifest.json`, blob: manifestBlob })
 
-      await zipPngs(files, `engninja-tiles-page-${pageNum}.zip`)
+      await zipPngs(result.files, `engninja-tiles-page-${pageNum}.zip`)
+    } catch (err) {
+      console.error('Export failed:', err)
+      alert('Export failed. See console for details.')
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
-  async function exportAll(){
+  async function handleExportAll() {
     setBusy(true)
+    setProgress({ current: 0, total: project.totalPages })
     try {
       if (!project.pdfBlobKey) return
       const blob = await getBlob(project.pdfBlobKey)
       if (!blob) return
       const pdf = await loadPdf(blob)
-      const nameMap = await getPageNameMap(pdf)
 
-      const files: {path:string, blob:Blob}[] = []
-      const manifest: any = { pages: [] as any[] }
-
-      for (let pageNum=1; pageNum<=project.totalPages; pageNum++){
-        const naming = nameMap.get(pageNum)!
-        const page = await pdf.getPage(pageNum)
-        const pageState = project.pages[pageNum]
-        const pageCanvas = await renderPageToCanvas(page, pageState.params.dpi)
-        const { tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY, marginPx } = pageState.params
-        const { overlapX:ox, overlapY:oy } = computeOverlapPixels(tileSize, overlapUnits, overlapXPercent, overlapYPercent, overlapX, overlapY)
-
-        const pageEntry: any = {
-          page: pageNum,
-          pageName: naming.pageName,
-          pageLabel: naming.pageLabel,
-          bookmarkPath: naming.bookmarkPath,
-          mode: project.mode,
-          params: pageState.params,
-          tiles: [] as any[],
-          masks: [] as any[]
-        }
-
-        if (project.mode === 'auto'){
-          const tiles = autoTiles(pageCanvas.width, pageCanvas.height, tileSize, ox, oy, marginPx)
-          let i = 0
-          for (const t of tiles){
-            const b = await cropTile(pageCanvas, t.x, t.y, t.w, t.h, tileSize)
-            const filename = `${naming.pageName}/auto/tile-${i}-${t.x}x${t.y}.png`
-            files.push({ path: filename, blob: b })
-            pageEntry.tiles.push({ index: i, x: t.x, y: t.y, w: t.w, h: t.h, filename })
-            i++
-          }
-        } else {
-          let i = 0
-          for (const t of pageState.manualTiles){
-            if (t.isMask){
-              pageEntry.masks.push({ id: t.id, x: t.x, y: t.y, size: t.size })
-              continue
-            }
-            const b = await cropTile(pageCanvas, t.x, t.y, t.size, t.size, t.size)
-            const filename = `${naming.pageName}/manual/tile-${i}-${t.x}x${t.y}.png`
-            files.push({ path: filename, blob: b })
-            pageEntry.tiles.push({ id: t.id, x: t.x, y: t.y, size: t.size, filename })
-            i++
-          }
-        }
-
-        manifest.pages.push(pageEntry)
-      }
+      const { files, manifest } = await exportAllPages(
+        pdf,
+        project,
+        (current, total) => setProgress({ current, total })
+      )
 
       // append global manifest and export info at the root
       const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
@@ -153,20 +68,46 @@ export default function ExportPanel(){
       files.push({ path: `export-info.json`, blob: new Blob([JSON.stringify(exportInfo, null, 2)], { type: 'application/json' }) })
 
       await zipPngs(files, `engninja-tiles-all-pages.zip`)
+    } catch (err) {
+      console.error('Export failed:', err)
+      alert('Export failed. See console for details.')
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
   return (
     <div className="p-3 border-t border-zinc-800 bg-zinc-900/40 flex items-center gap-3">
-      <button disabled={busy} onClick={()=>exportPage(project.currentPage)} className="px-3 py-2 rounded bg-emerald-600 disabled:opacity-50">
+      <button
+        disabled={busy}
+        onClick={() => handleExportPage(project.currentPage)}
+        className="px-3 py-2 rounded bg-emerald-600 disabled:opacity-50 hover:bg-emerald-500 transition-colors"
+      >
         Export Current Page
       </button>
-      <button disabled={busy} onClick={exportAll} className="px-3 py-2 rounded bg-emerald-700 disabled:opacity-50">
+      <button
+        disabled={busy}
+        onClick={handleExportAll}
+        className="px-3 py-2 rounded bg-emerald-700 disabled:opacity-50 hover:bg-emerald-600 transition-colors"
+      >
         Export All Pages
       </button>
-      {busy && <span className="text-sm opacity-70">Exporting…</span>}
+      {busy && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm opacity-70">
+            {progress ? `Exporting… ${progress.current}/${progress.total}` : 'Exporting…'}
+          </span>
+          {progress && (
+            <div className="w-24 h-2 bg-zinc-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 transition-all duration-300"
+                style={{ width: `${(progress.current / progress.total) * 100}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

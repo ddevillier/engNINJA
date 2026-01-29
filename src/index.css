@@ -7,6 +7,19 @@ html, body, #root {
   height: 100%;
 }
 
+:root {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .scroll-thin::-webkit-scrollbar {
   width: 8px;
   height: 8px;
